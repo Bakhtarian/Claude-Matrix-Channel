@@ -15,6 +15,7 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
+import { z } from 'zod'
 import {
   MatrixClient,
   SimpleFsStorageProvider,
@@ -753,9 +754,17 @@ let lastActiveRoom: string | null = null
 
 const VERDICT_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i
 
-mcp.setNotificationHandler(
-  { method: 'notifications/claude/channel/permission_request' } as any,
-  async (notification: any) => {
+const PermissionRequestSchema = z.object({
+  method: z.literal('notifications/claude/channel/permission_request'),
+  params: z.object({
+    request_id: z.string(),
+    tool_name: z.string(),
+    description: z.string(),
+    input_preview: z.string(),
+  }).optional(),
+})
+
+mcp.setNotificationHandler(PermissionRequestSchema, async (notification) => {
     const params = notification.params as {
       request_id: string
       tool_name: string
