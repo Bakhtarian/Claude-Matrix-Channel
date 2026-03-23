@@ -1,4 +1,4 @@
-# Matrix
+# Matrix Channel for Claude Code
 
 Connect a Matrix bot to your Claude Code session with an MCP server.
 
@@ -7,95 +7,172 @@ When the bot receives a message, the MCP server forwards it to Claude and provid
 ## Prerequisites
 
 - [Bun](https://bun.sh) — the MCP server runs on Bun. Install with `curl -fsSL https://bun.sh/install | bash`.
+- A Matrix homeserver you have access to (e.g. your own Synapse instance, or matrix.org)
+- A dedicated Matrix account for the bot
 
 ## Important: No E2EE Support
 
-This channel does **not** support end-to-end encrypted rooms. Element defaults to encrypting DMs, so you must create an **unencrypted** room for the bot:
+This channel does **not** support end-to-end encrypted rooms. Most Matrix clients (including Element) default to encrypting DMs, so you **cannot** just DM the bot directly — the room would be encrypted and the bot won't see your messages.
+
+Instead, you must **create an unencrypted room** and invite the bot to it:
 
 - In Element: **Create new room** → toggle off **"Enable end-to-end encryption"**
-- Or invite the bot to an existing unencrypted room
+- Or use the Matrix API to create a room with `"preset": "public_chat"` and `"visibility": "private"` (public_chat preset does not enable encryption)
 
 ## Quick Setup
 
-> Default pairing flow for a single-user DM bot. See [ACCESS.md](./ACCESS.md) for rooms and multi-user setups.
+### 1. Create a Matrix account for the bot
 
-**1. Create a Matrix account for your bot.**
+Register a new account on your homeserver for the bot. If your homeserver has open registration disabled (most do), you'll need admin access.
 
-Register a new account on your homeserver (e.g. matrix.org) for the bot. You can use Element or any Matrix client to register.
-
-**2. Get the access token.**
-
-In Element: **Settings → Help & About → Access Token** (scroll to the bottom). Copy it — treat it like a password.
-
-Alternatively, use the Matrix login API:
+**With Synapse admin access (SSH to your server):**
 
 ```sh
-curl -X POST "https://matrix.org/_matrix/client/v3/login" \
+docker exec synapse register_new_matrix_user \
+  -u mybotname \
+  -p 'a-strong-password-here' \
+  --no-admin \
+  -c /data/homeserver.yaml \
+  http://localhost:8008
+```
+
+**With open registration enabled**, use any Matrix client (Element, etc.) to register a new account.
+
+### 2. Get the access token
+
+Log in with the bot account to get an access token:
+
+```sh
+curl -X POST "https://your-homeserver/_matrix/client/v3/login" \
   -H "Content-Type: application/json" \
-  -d '{"type":"m.login.password","user":"@botname:matrix.org","password":"..."}'
+  -d '{"type":"m.login.password","user":"mybotname","password":"a-strong-password-here"}'
 ```
 
-The response includes `access_token`.
+The response includes `access_token` — save it, you'll need it in step 4.
 
-**3. Install the plugin.**
-
-These are Claude Code commands — run `claude` to start a session first.
-
-```
-/plugin install matrix@claude-plugins-official
-```
-
-Or if running from source:
-```
-/plugin install /path/to/claude-matrix-channel
-```
-
-**4. Give the server the credentials.**
-
-```
-/matrix:configure https://matrix.org syt_your_access_token_here
-```
-
-Writes `MATRIX_HOMESERVER_URL` and `MATRIX_ACCESS_TOKEN` to `~/.claude/channels/matrix/.env`. You can also write that file by hand, or set the variables in your shell environment — shell takes precedence.
-
-> To run multiple bots on one machine (different tokens, separate allowlists), point `MATRIX_STATE_DIR` at a different directory per instance.
-
-**5. Relaunch with the channel flag.**
-
-Exit your session and start a new one:
+### 3. Clone and install
 
 ```sh
-claude --channels plugin:matrix@claude-plugins-official
+git clone https://github.com/YOUR_USERNAME/claude-matrix-channel.git
+cd claude-matrix-channel
+bun install
 ```
 
-Or from source:
+### 4. Configure credentials
+
+Create the credentials file:
+
 ```sh
+mkdir -p ~/.claude/channels/matrix
+cat > ~/.claude/channels/matrix/.env << 'EOF'
+MATRIX_HOMESERVER_URL=https://your-homeserver
+MATRIX_ACCESS_TOKEN=syt_your_access_token_here
+EOF
+chmod 600 ~/.claude/channels/matrix/.env
+```
+
+Replace `https://your-homeserver` and the access token with your actual values from steps 1-2.
+
+### 5. Create an unencrypted room and invite the bot
+
+You **must** create an unencrypted room — DMs won't work because they're encrypted by default.
+
+**Using the Matrix API** (replace the homeserver URL and your access token):
+
+```sh
+# Create the room (using YOUR personal access token, not the bot's)
+curl -X POST "https://your-homeserver/_matrix/client/v3/createRoom" \
+  -H "Authorization: Bearer YOUR_PERSONAL_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Claude Bot",
+    "preset": "public_chat",
+    "visibility": "private"
+  }'
+```
+
+This returns a `room_id` (e.g. `!abc123:your-homeserver`). Then invite the bot:
+
+```sh
+curl -X POST "https://your-homeserver/_matrix/client/v3/rooms/ROOM_ID/invite" \
+  -H "Authorization: Bearer YOUR_PERSONAL_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"@mybotname:your-homeserver"}'
+```
+
+The bot will auto-join when the server starts. You can also create the room using Element (make sure to disable encryption) and invite the bot from the UI.
+
+**Using Element:**
+1. Click **+** → **New Room**
+2. Name it whatever you like
+3. **Disable** "Enable end-to-end encryption"
+4. Create the room
+5. Invite `@mybotname:your-homeserver`
+
+### 6. Configure access control
+
+Create the access control file. Replace the user ID and room ID with your actual values:
+
+```sh
+cat > ~/.claude/channels/matrix/access.json << 'EOF'
+{
+  "version": 1,
+  "dmPolicy": "pairing",
+  "allowFrom": ["@youruser:your-homeserver"],
+  "rooms": {
+    "!your-room-id:your-homeserver": {
+      "requireMention": false,
+      "allowFrom": []
+    }
+  },
+  "pending": {}
+}
+EOF
+```
+
+- `allowFrom`: your Matrix user ID (the account you'll message from)
+- `rooms`: the room ID from step 5. Set `requireMention: false` if you want the bot to respond to every message, or `true` to only respond when @mentioned.
+
+To find your room ID in Element: **Room Settings → Advanced → Internal room ID**.
+
+### 7. Launch Claude Code with the channel
+
+From the `claude-matrix-channel` directory:
+
+```sh
+cd /path/to/claude-matrix-channel
 claude --dangerously-load-development-channels server:matrix
 ```
 
-**6. Pair.**
+You should see the channel connect in the startup output. Send a message in the room — Claude will receive it and respond.
 
-With Claude Code running, DM your bot on Matrix (in an **unencrypted** room) — it replies with a pairing code. In your Claude Code session:
+## Access Control
 
+See **[ACCESS.md](./ACCESS.md)** for the full access control documentation including:
+
+- DM policies (pairing, allowlist, disabled)
+- Room-level policies and mention detection
+- Delivery configuration (reactions, chunking, message type)
+- The complete `access.json` schema
+
+### Quick Reference
+
+Edit `~/.claude/channels/matrix/access.json` directly — the server re-reads it on every inbound message, so changes take effect immediately without a restart.
+
+**Add a user to the allowlist:**
+```json
+"allowFrom": ["@alice:your-homeserver", "@bob:your-homeserver"]
 ```
-/matrix:access pair <code>
+
+**Add a room:**
+```json
+"rooms": {
+  "!roomid:your-homeserver": {
+    "requireMention": true,
+    "allowFrom": []
+  }
+}
 ```
-
-Your next DM reaches the assistant.
-
-**7. Lock it down.**
-
-Pairing is for capturing IDs. Once you're in, switch to `allowlist`:
-
-```
-/matrix:access policy allowlist
-```
-
-## Access control
-
-See **[ACCESS.md](./ACCESS.md)** for DM policies, room support, mention detection, delivery config, and the `access.json` schema.
-
-Quick reference: IDs are Matrix user IDs (`@user:homeserver`). Default policy is `pairing`. Rooms are opt-in per room ID.
 
 ## Tools exposed to the assistant
 
@@ -123,8 +200,23 @@ Each Claude Code session runs its own Matrix channel instance. To connect
 multiple agents, set `MATRIX_STATE_DIR` to a different directory per instance:
 
 ```sh
-MATRIX_STATE_DIR=~/.claude/channels/matrix-agent2 claude --channels ...
+MATRIX_STATE_DIR=~/.claude/channels/matrix-agent2 claude \
+  --dangerously-load-development-channels server:matrix
 ```
 
 Each instance gets independent: access.json, .env (same or different bot
 accounts), inbox, sync storage.
+
+## Troubleshooting
+
+**"no MCP server configured with that name"** — Make sure you're running `claude` from the `claude-matrix-channel` directory so it can find the `.mcp.json` file.
+
+**"Failed to reconnect to matrix"** — Check your credentials in `~/.claude/channels/matrix/.env`. Verify the homeserver URL is correct and the access token is valid.
+
+**Bot doesn't respond to messages** — Check that:
+1. The room is **not encrypted** (this is the most common issue)
+2. Your user ID is in the `allowFrom` list in `access.json`
+3. The room ID is in the `rooms` section of `access.json`
+4. If `requireMention` is `true`, you need to @mention the bot
+
+**"E2EE not supported" in logs** — The room is encrypted. Create a new unencrypted room instead (see step 5).
