@@ -12,6 +12,7 @@ import {
   ShieldColor,
   EncryptionSettings,
   CollectStrategy,
+  VerificationMethod,
   type OutgoingRequest,
   type ProcessedToDeviceEvent,
 } from '@matrix-org/matrix-sdk-crypto-wasm'
@@ -53,7 +54,7 @@ export function getOlmMachine(): OlmMachine {
 // Outgoing crypto request dispatch
 // ---------------------------------------------------------------------------
 
-async function sendCryptoRequest(
+export async function sendCryptoRequest(
   client: MatrixClient,
   req: OutgoingRequest,
 ): Promise<void> {
@@ -287,5 +288,5 @@ export async function encryptIfNeeded(
 }
 
 // Re-export types that server.ts may need
-export { RequestType, TrustRequirement, ShieldColor }
+export { RequestType, TrustRequirement, ShieldColor, VerificationMethod }
 export type { OlmMachine, OutgoingRequest, ProcessedToDeviceEvent }

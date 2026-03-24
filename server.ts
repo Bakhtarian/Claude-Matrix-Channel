@@ -26,6 +26,10 @@ import {
   closeCrypto,
   decryptRoomEvent,
   encryptIfNeeded,
+  getOlmMachine,
+  sendCryptoRequest,
+  processOutgoingRequests,
+  VerificationMethod,
 } from './crypto.js'
 import { randomBytes } from 'crypto'
 import {
@@ -468,8 +472,34 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         required: ['room_id', 'event_id'],
       },
     },
+    {
+      name: 'verify_device',
+      description:
+        'Manage E2EE device verification. Actions: "status" shows bot device info and pending requests; ' +
+        '"accept" accepts a pending verification request and starts SAS; ' +
+        '"confirm" confirms the emoji match; "cancel" cancels verification.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['status', 'accept', 'confirm', 'cancel'],
+            description: 'The verification action to perform.',
+          },
+          user_id: {
+            type: 'string',
+            description: 'Matrix user ID for the verification. Required for accept.',
+          },
+        },
+        required: ['action'],
+      },
+    },
   ],
 }))
+
+// --- Active SAS verification state ---
+let activeSas: import('@matrix-org/matrix-sdk-crypto-wasm').Sas | null = null
+let activeVerificationRequest: import('@matrix-org/matrix-sdk-crypto-wasm').VerificationRequest | null = null
 
 // --- Tool handlers ---
 
@@ -738,6 +768,133 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
             text: `downloaded attachment:\n  ${path}  (${safeFileName}, ${info?.mimetype ?? 'unknown'}, ${kb}KB)`,
           }],
         }
+      }
+
+      case 'verify_device': {
+        const action = args.action as string
+        const userId = args.user_id as string | undefined
+
+        const m = getOlmMachine()
+
+        if (action === 'status') {
+          const deviceId = m.deviceId.toString()
+          const identityKeys = m.identityKeys
+          const ed25519 = identityKeys.ed25519.toBase64()
+
+          const lines = [
+            `Bot device ID: ${deviceId}`,
+            `Ed25519 fingerprint: ${ed25519}`,
+            '',
+          ]
+
+          // Show active SAS state
+          if (activeSas) {
+            const emoji = activeSas.emoji()
+            if (emoji) {
+              lines.push('Active SAS verification — emoji to compare:')
+              lines.push(emoji.map(e => `${e.symbol} ${e.description}`).join('  |  '))
+              lines.push('')
+              lines.push('If these match what the other device shows, use action "confirm". Otherwise use "cancel".')
+            } else if (activeSas.canBePresented()) {
+              lines.push('SAS is ready but emoji not yet available. Try status again in a moment.')
+            } else {
+              lines.push('SAS verification in progress, waiting for other side...')
+            }
+          } else if (activeVerificationRequest) {
+            lines.push(`Pending verification request (time remaining: ${Math.round(activeVerificationRequest.timeRemainingMillis() / 1000)}s)`)
+            lines.push('Use action "accept" to start SAS emoji verification.')
+          } else {
+            lines.push('No active verification. To verify:')
+            lines.push('1. From Element: go to bot profile > Sessions > Verify the bot device')
+            lines.push('2. Then use action "status" here to see the SAS emoji')
+          }
+
+          return { content: [{ type: 'text', text: lines.join('\n') }] }
+        }
+
+        if (action === 'accept') {
+          // Look for pending verification requests
+          if (!userId) {
+            return { content: [{ type: 'text', text: 'user_id is required for accept action' }], isError: true }
+          }
+
+          const { UserId } = await import('@matrix-org/matrix-sdk-crypto-wasm')
+          const requests = m.getVerificationRequests(new UserId(userId))
+
+          if (requests.length === 0) {
+            return { content: [{ type: 'text', text: `No pending verification requests from ${userId}. Start verification from Element first.` }] }
+          }
+
+          const request = requests[requests.length - 1] // latest
+          activeVerificationRequest = request
+
+          // Accept with SAS method
+          const acceptOutgoing = request.acceptWithMethods([VerificationMethod.SasV1])
+          if (acceptOutgoing) {
+            await sendCryptoRequest(matrixClient, acceptOutgoing)
+          }
+
+          // Start SAS
+          const sasResult = await request.startSas()
+          if (!sasResult) {
+            return { content: [{ type: 'text', text: 'Could not start SAS. The other side may need to accept first. Try "status" in a few seconds.' }] }
+          }
+
+          const [sas, sasOutgoing] = sasResult
+          activeSas = sas
+          await sendCryptoRequest(matrixClient, sasOutgoing)
+
+          // Accept SAS if we are the acceptor
+          const sasAccept = sas.accept()
+          if (sasAccept) {
+            await sendCryptoRequest(matrixClient, sasAccept)
+          }
+
+          await processOutgoingRequests(matrixClient)
+
+          // Try to get emoji immediately
+          const emoji = sas.emoji()
+          if (emoji) {
+            const emojiStr = emoji.map(e => `${e.symbol} ${e.description}`).join('  |  ')
+            return { content: [{ type: 'text', text: `SAS verification started. Compare these emoji:\n\n${emojiStr}\n\nIf they match, use action "confirm". Otherwise "cancel".` }] }
+          }
+
+          return { content: [{ type: 'text', text: 'SAS verification started. Waiting for emoji — use "status" to check.' }] }
+        }
+
+        if (action === 'confirm') {
+          if (!activeSas) {
+            return { content: [{ type: 'text', text: 'No active SAS verification to confirm.' }], isError: true }
+          }
+
+          const confirmRequests = await activeSas.confirm()
+          for (const req of confirmRequests) {
+            await sendCryptoRequest(matrixClient, req)
+          }
+          await processOutgoingRequests(matrixClient)
+
+          activeSas = null
+          activeVerificationRequest = null
+
+          return { content: [{ type: 'text', text: 'Verification confirmed! The device is now trusted.' }] }
+        }
+
+        if (action === 'cancel') {
+          if (activeSas) {
+            const cancelReq = activeSas.cancel()
+            if (cancelReq) await sendCryptoRequest(matrixClient, cancelReq)
+            activeSas = null
+          } else if (activeVerificationRequest) {
+            const cancelReq = activeVerificationRequest.cancel()
+            if (cancelReq) await sendCryptoRequest(matrixClient, cancelReq)
+          }
+          activeVerificationRequest = null
+          await processOutgoingRequests(matrixClient)
+
+          return { content: [{ type: 'text', text: 'Verification cancelled.' }] }
+        }
+
+        return { content: [{ type: 'text', text: `Unknown verify action: ${action}` }], isError: true }
       }
 
       default:

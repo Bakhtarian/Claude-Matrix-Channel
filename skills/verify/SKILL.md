@@ -1,54 +1,52 @@
 ---
 name: verify
-description: Interactively verify a Matrix device using SAS (emoji comparison) for E2EE. Lists pending verification requests or initiates one.
+description: Interactively verify a Matrix device using SAS emoji comparison for E2EE. Lists pending verification requests or initiates one.
 user-invocable: true
-arguments: "[optional @user:server to verify]"
+allowed-tools:
+  - Read
+  - mcp__matrix__verify_device
+arguments: "user-to-verify"
 ---
 
 # Matrix Device Verification
 
-Interactive SAS (Short Authentication String) verification for E2EE.
+Interactive SAS emoji verification for E2EE rooms.
 
-## What This Does
+Arguments passed: `$ARGUMENTS`
 
-Establishes cryptographic trust between the bot's device and another user's device so that encrypted messages can be exchanged. Both sides compare a set of 7 emoji — if they match, the devices are mutually verified.
+## How to verify
 
-## Steps
+Use the `verify_device` MCP tool to drive the verification flow.
 
-1. **Check for pending verification requests** — call `getOlmMachine()` from `crypto.ts`, then `machine.getVerificationRequests(userId)` for known users. List any pending requests with their user ID, device ID, and time remaining.
+### Step 1 — Check status
 
-2. **If no pending requests and no argument given** — show the bot's device ID and Ed25519 key fingerprint. Instruct the user to initiate verification from Element: Settings → Sessions → find the bot's device → Verify.
+Call `verify_device` with action `status` to see the bot's device ID, fingerprint, and any pending verification requests.
 
-3. **If a @user:server argument is given** — initiate verification toward that user:
-   - Call `machine.getDevice(new UserId(userId), new DeviceId(deviceId))` to find their device
-   - Call `device.requestVerification([VerificationMethod.SasV1])` to start
-   - Send the resulting ToDeviceRequest via `sendCryptoRequest`
+If no pending requests:
+- Tell the user to initiate verification from Element: go to the bot's profile, click Sessions, find the bot's device, and click Verify.
+- Then check status again to pick up the request.
 
-4. **Accept and start SAS** — once a request is ready:
-   - Call `request.acceptWithMethods([VerificationMethod.SasV1])`
-   - Send the resulting OutgoingVerificationRequest
-   - Call `request.startSas()` → returns `[Sas, OutgoingVerificationRequest]`
-   - Send the SAS outgoing request
-   - If we are the acceptor (not initiator), also call `sas.accept()` and send that
+### Step 2 — Accept and start SAS
 
-5. **Display emoji** — poll `sas.canBePresented()`, then call `sas.emoji()` to get 7 Emoji objects with `symbol` and `description` fields. Display clearly:
+If `$ARGUMENTS` contains a user ID, or status shows a pending request:
 
-   ```
-   Verify these emoji match what you see in Element:
+Call `verify_device` with action `accept` and the `user_id` of the other party. This accepts the request and starts the SAS emoji exchange.
 
-   🐶 Dog  |  🔑 Key  |  🎩 Hat  |  📌 Pin  |  🎧 Headphones  |  ✂️ Scissors  |  🔔 Bell
+### Step 3 — Show emoji
 
-   Do they match? (yes/no)
-   ```
+Call `verify_device` with action `status` to see the 7 SAS emoji. Display them clearly and ask the user to confirm they match what Element shows.
 
-6. **Confirm or cancel** — if user confirms, call `sas.confirm()` and send resulting requests. If denied, call `sas.cancel()`.
+### Step 4 — Confirm or cancel
 
-7. **Process remaining outgoing requests** after confirmation to complete verification.
+- If the user confirms the emoji match: call `verify_device` with action `confirm`.
+- If they don't match: call `verify_device` with action `cancel`.
 
-## Important Notes
+### Step 5 — Done
 
-- Verification requests time out (typically 10 minutes). Show `request.timeRemainingMillis()`.
-- After verification completes, the OlmMachine marks the device as trusted automatically.
-- The skill imports from `crypto.ts` — use `getOlmMachine()`, `processOutgoingRequests()`, and `sendCryptoRequest()`.
-- Use `VerificationMethod.SasV1` from `@matrix-org/matrix-sdk-crypto-wasm`.
-- After all SAS steps, call `processOutgoingRequests(matrixClient)` to flush any remaining crypto requests.
+After confirmation, the device is trusted. Encrypted messages will now be delivered from that user's verified devices.
+
+## Notes
+
+- Verification requests time out after about 10 minutes.
+- The user must start verification from Element before we can accept it.
+- After verification, the OlmMachine marks the device as trusted automatically.
