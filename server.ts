@@ -6,7 +6,7 @@
  * room support with mention-triggering. State lives in
  * ~/.claude/channels/matrix/access.json — managed by the /matrix:access skill.
  *
- * E2EE is not supported — rooms must be unencrypted.
+ * E2EE: inbound decryption is supported via matrix-sdk-crypto-wasm.
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
@@ -24,6 +24,7 @@ import {
   CryptoMatrixClient,
   initCrypto,
   closeCrypto,
+  decryptRoomEvent,
 } from './crypto.js'
 import { randomBytes } from 'crypto'
 import {
@@ -204,6 +205,9 @@ type GateResult =
   | { action: 'deliver'; access: Access }
   | { action: 'drop' }
   | { action: 'pair'; code: string; isResend: boolean }
+
+// Track rooms where we've already sent the "unverified" notice.
+const unverifiedNoticeRooms = new Set<string>()
 
 // Track event IDs we recently sent, so reply-to-bot counts as a mention.
 const recentSentIds = new Set<string>()
@@ -915,10 +919,35 @@ matrixClient.on('room.message', async (roomId: string, event: Record<string, unk
   }
 })
 
-// Handle encrypted events separately
+// Decrypt encrypted events and re-emit as room.message
 matrixClient.on('room.event', async (roomId: string, event: Record<string, unknown>) => {
-  if (event.type === 'm.room.encrypted') {
-    process.stderr.write(`matrix channel: encrypted event in ${roomId} — E2EE not supported, messages in this room will not be delivered\n`)
+  if (event.type !== 'm.room.encrypted') return
+  try {
+    const result = await decryptRoomEvent(roomId, event)
+    // ShieldColor: Red=0, Grey=1, None=2. Only deliver None (fully verified).
+    if (result.shieldColor !== 2) {
+      if (!unverifiedNoticeRooms.has(roomId)) {
+        unverifiedNoticeRooms.add(roomId)
+        try {
+          await matrixClient.sendNotice(
+            roomId,
+            "I can't read messages here until my device is verified. " +
+            "Please verify my device from Element (Settings > Sessions) " +
+            "or ask the terminal user to run /matrix:verify.",
+          )
+        } catch {}
+      }
+      return
+    }
+    // Decrypted and verified — re-emit as room.message
+    const clearEvent = {
+      ...event,
+      type: result.event.type ?? 'm.room.message',
+      content: result.event.content,
+    }
+    matrixClient.emit('room.message', roomId, clearEvent)
+  } catch (err) {
+    process.stderr.write(`matrix channel: decryption failed in ${roomId}: ${err}\n`)
   }
 })
 

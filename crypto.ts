@@ -8,6 +8,8 @@ import {
   RequestType,
   DecryptionSettings,
   TrustRequirement,
+  RoomId,
+  ShieldColor,
   type OutgoingRequest,
   type ProcessedToDeviceEvent,
 } from '@matrix-org/matrix-sdk-crypto-wasm'
@@ -201,6 +203,35 @@ export async function isRoomEncrypted(client: MatrixClient, roomId: string): Pro
   }
 }
 
+// ---------------------------------------------------------------------------
+// Room event decryption
+// ---------------------------------------------------------------------------
+
+export type DecryptionResult = {
+  event: Record<string, unknown>
+  shieldColor: number // ShieldColor enum value: Red=0, Grey=1, None=2
+  shieldMessage?: string
+}
+
+export async function decryptRoomEvent(
+  roomId: string,
+  event: Record<string, unknown>,
+): Promise<DecryptionResult> {
+  const m = getOlmMachine()
+  const decrypted = await m.decryptRoomEvent(
+    JSON.stringify(event),
+    new RoomId(roomId),
+    new DecryptionSettings(TrustRequirement.Untrusted),
+  )
+  const shield = decrypted.shieldState(true)
+  const clearEvent = JSON.parse(decrypted.event)
+  return {
+    event: clearEvent,
+    shieldColor: shield.color,
+    shieldMessage: shield.message ?? undefined,
+  }
+}
+
 // Re-export types that server.ts may need
-export { RequestType, TrustRequirement }
+export { RequestType, TrustRequirement, ShieldColor }
 export type { OlmMachine, OutgoingRequest, ProcessedToDeviceEvent }
