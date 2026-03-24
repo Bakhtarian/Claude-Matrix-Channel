@@ -20,6 +20,11 @@ import {
   MatrixClient,
   SimpleFsStorageProvider,
 } from 'matrix-bot-sdk'
+import {
+  CryptoMatrixClient,
+  initCrypto,
+  closeCrypto,
+} from './crypto.js'
 import { randomBytes } from 'crypto'
 import {
   readFileSync,
@@ -67,7 +72,7 @@ if (!HOMESERVER_URL || !ACCESS_TOKEN) {
 }
 
 // Forward-declared — initialized after MCP transport connects.
-let matrixClient: MatrixClient
+let matrixClient: CryptoMatrixClient
 
 // Last-resort safety net
 process.on('unhandledRejection', err => {
@@ -695,6 +700,7 @@ function shutdown(): void {
   if (shuttingDown) return
   shuttingDown = true
   process.stderr.write('matrix channel: shutting down\n')
+  closeCrypto()
   matrixClient.stop()
   setTimeout(() => process.exit(0), 2000)
 }
@@ -707,7 +713,7 @@ process.on('SIGINT', shutdown)
 mkdirSync(BOT_STORE_DIR, { recursive: true })
 const storage = new SimpleFsStorageProvider(join(BOT_STORE_DIR, 'bot.json'))
 
-matrixClient = new MatrixClient(HOMESERVER_URL, ACCESS_TOKEN, storage)
+matrixClient = new CryptoMatrixClient(HOMESERVER_URL, ACCESS_TOKEN, storage)
 
 const startupTimestamp = Date.now()
 let botUserId: string
@@ -920,6 +926,13 @@ matrixClient.on('room.event', async (roomId: string, event: Record<string, unkno
 try {
   botUserId = await matrixClient.getUserId()
   process.stderr.write(`matrix channel: connecting as ${botUserId}\n`)
+
+  try {
+    const deviceId = 'CLAUDE_' + Buffer.from(BOT_STORE_DIR).toString('base64url').slice(0, 12).toUpperCase()
+    await initCrypto(botUserId, deviceId, 'claude-matrix-crypto')
+  } catch (err) {
+    process.stderr.write(`matrix channel: E2EE init failed (encrypted rooms won't work): ${err}\n`)
+  }
 
   // Refresh m.direct cache
   await refreshDirectRooms(matrixClient)
