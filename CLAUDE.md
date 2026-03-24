@@ -55,19 +55,21 @@ All runtime state lives in `~/.claude/channels/matrix/` (override with `MATRIX_S
   "ackReaction": "👀",
   "textChunkLimit": 40000,
   "chunkMode": "newline",
-  "msgType": "m.notice"
+  "msgType": "m.notice",
+  "requireVerifiedDevice": false
 }
 ```
 
 ## E2EE
 
 - `CryptoMatrixClient` extends `MatrixClient`, feeds sync data to OlmMachine before base processing
-- `encryptIfNeeded()` uses `CollectStrategy.onlyTrustedDevices()` — only verified devices get room keys
+- `encryptIfNeeded()` tracks room members, flushes `KeysQuery` via `processOutgoingRequests()`, claims missing sessions, shares room keys, then encrypts. Sharing strategy depends on `requireVerifiedDevice` in `access.json`: `true` uses `CollectStrategy.onlyTrustedDevices()`, `false` (default) uses `CollectStrategy.allDevices()`.
 - `decryptRoomEvent()` returns shield color: 0=Red/unverified, 1=Grey/partial, 2=None/verified
-- Unverified devices get a one-time notice per room explaining how to verify
+- When `requireVerifiedDevice` is true, unverified devices get a one-time notice per room explaining how to verify. When false (default), messages from unverified devices are accepted.
 - Verification uses SAS (emoji comparison) via `/matrix:verify` skill
 - **Crypto store is in-memory** (`fake-indexeddb`): OlmMachine state is lost between restarts. One-time keys regenerate each run; `KeysUpload` handles "already exists" conflicts by retrying without OTKs.
 - **Device ID** is fetched from the homeserver's `/whoami` endpoint at startup (not generated locally)
+- **Wasm object ownership**: `@matrix-org/matrix-sdk-crypto-wasm` consumes `UserId` (and similar) objects when passed to OlmMachine methods. Never reuse a `UserId` instance across multiple calls — create fresh instances each time via a factory like `() => members.map(uid => new UserId(uid))`.
 
 ## Skills (SKILL.md frontmatter)
 
@@ -87,6 +89,8 @@ Skills use `user-invocable: true` (hyphen, not underscore). They are registered 
 **"Failed to reconnect to matrix"**: Check `~/.claude/channels/matrix/.env` — homeserver URL and access token must be valid.
 
 **"One time key already exists"**: Expected on restart since the crypto store is in-memory. The `KeysUpload` handler retries without OTKs automatically. Device keys still upload successfully.
+
+**"array contains a value of the wrong type"**: Wasm `UserId`/`RoomId` objects were reused after being consumed. Each OlmMachine method call takes ownership of these objects — create fresh instances for each call.
 
 **Skills not found after install**: Ensure `user-invocable: true` uses a hyphen. Run `/reload-plugins` after installing.
 

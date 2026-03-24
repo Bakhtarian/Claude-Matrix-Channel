@@ -97,6 +97,12 @@ Configure outbound behavior with `/matrix:access set <key> <value>`.
 /matrix:access set msgType m.text
 ```
 
+**`requireVerifiedDevice`** controls whether E2EE requires device verification. When `false` (default), the bot encrypts for all devices and accepts messages from unverified senders. When `true`, only verified/trusted devices receive room keys and unverified messages are rejected.
+
+```
+/matrix:access set requireVerifiedDevice false
+```
+
 ## Skill reference
 
 | Command | Effect |
@@ -149,7 +155,10 @@ Configure outbound behavior with `/matrix:access set <key> <value>`.
   "chunkMode": "newline",
 
   // m.notice (default, bot convention) or m.text (normal messages).
-  "msgType": "m.notice"
+  "msgType": "m.notice",
+
+  // Require device verification for E2EE. Default false.
+  "requireVerifiedDevice": false
 }
 ```
 

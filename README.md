@@ -6,19 +6,20 @@ When the bot receives a message, the MCP server forwards it to Claude and provid
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) — the MCP server runs on Bun. Install with `curl -fsSL https://bun.sh/install | bash`.
+- [Bun](https://bun.sh) (default) or another TypeScript runtime (see [Alternative Runtimes](#alternative-runtimes))
 - A Matrix homeserver you have access to (e.g. your own Synapse instance, or matrix.org)
 - A dedicated Matrix account for the bot
 
 ## End-to-End Encryption
 
-E2EE is supported. The bot works in both encrypted and unencrypted rooms. For encrypted rooms, you must verify the bot's device before messages will be delivered.
+E2EE is supported. The bot works in both encrypted and unencrypted rooms.
 
-**To verify the bot's device:**
+By default, the bot encrypts for **all** devices in the room and accepts messages from unverified devices. To require device verification (stricter security), set `"requireVerifiedDevice": true` in `access.json`.
+
+**To verify the bot's device (optional, or required if `requireVerifiedDevice` is enabled):**
 - From Element: Go to the bot user's profile → Sessions → Click the bot's device → Verify
 - From the terminal: Run `/matrix:verify` to interactively verify devices
-
-Until the bot's device is verified, messages in encrypted rooms are dropped and the bot sends a notice explaining what to do.
+- To locally trust all devices for a user without SAS: use the `verify_device` tool with action `trust`
 
 ## Quick Setup
 
@@ -135,12 +136,14 @@ cat > ~/.claude/channels/matrix/access.json << 'EOF'
       "allowFrom": []
     }
   },
-  "pending": {}
+  "pending": {},
+  "requireVerifiedDevice": false
 }
 EOF
 ```
 
 - `allowFrom`: your Matrix user ID (the account you'll message from)
+- `requireVerifiedDevice`: set to `true` to only accept messages from verified devices (default: `false`)
 - `rooms`: the room ID from step 5. Set `requireMention: false` if you want the bot to respond to every message, or `true` to only respond when @mentioned.
 
 To find your room ID in Element: **Room Settings → Advanced → Internal room ID**.
@@ -193,6 +196,7 @@ Edit `~/.claude/channels/matrix/access.json` directly — the server re-reads it
 | `edit_message` | Edit a message the bot previously sent. Useful for progress updates. |
 | `fetch_messages` | Pull recent history from a room (oldest-first, max 100). Each line includes the event ID. |
 | `download_attachment` | Download media from a specific message to `~/.claude/channels/matrix/inbox/`. Returns file path + metadata. |
+| `verify_device` | Manage E2EE device verification. Actions: `status`, `initiate`, `accept`, `confirm`, `cancel`, `trust`. Used by `/matrix:verify` for SAS emoji verification. |
 
 Inbound messages trigger a typing indicator automatically — Element shows
 "botname is typing…" while the assistant works on a response.
@@ -217,6 +221,36 @@ MATRIX_STATE_DIR=~/.claude/channels/matrix-agent2 claude \
 Each instance gets independent: access.json, .env (same or different bot
 accounts), inbox, sync storage.
 
+## Alternative Runtimes
+
+The server defaults to Bun but can run on other TypeScript runtimes. Override the command in `.mcp.json`:
+
+**Using `npx tsx`:**
+```json
+{
+  "mcpServers": {
+    "matrix": {
+      "command": "npx",
+      "args": ["tsx", "server.ts"]
+    }
+  }
+}
+```
+
+**Using Deno:**
+```json
+{
+  "mcpServers": {
+    "matrix": {
+      "command": "deno",
+      "args": ["run", "--allow-all", "server.ts"]
+    }
+  }
+}
+```
+
+You can also set `MATRIX_RUNTIME` in your shell and use the npm start script: `MATRIX_RUNTIME=npx tsx npm start`.
+
 ## Troubleshooting
 
 **"no MCP server configured with that name"** — Make sure you're running `claude` from the `claude-matrix-channel` directory so it can find the `.mcp.json` file.
@@ -229,4 +263,6 @@ accounts), inbox, sync storage.
 3. The room ID is in the `rooms` section of `access.json`
 4. If `requireMention` is `true`, you need to @mention the bot
 
-**"unverified" notice in an encrypted room** — Verify the bot's device from Element or run `/matrix:verify` in the terminal.
+**"unverified" notice in an encrypted room** — This only appears when `requireVerifiedDevice` is `true` in `access.json`. Either verify the bot's device (Element or `/matrix:verify`), or set `"requireVerifiedDevice": false` to accept messages from unverified devices.
+
+**"array contains a value of the wrong type"** — This is a wasm ownership error in `@matrix-org/matrix-sdk-crypto-wasm`. The `UserId` objects passed to OlmMachine methods are consumed (freed) by each call. If you see this, ensure fresh `UserId` instances are created for each wasm method call rather than reusing objects.

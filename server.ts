@@ -113,6 +113,7 @@ type Access = {
   textChunkLimit?: number
   chunkMode?: 'length' | 'newline'
   msgType?: 'm.notice' | 'm.text'
+  requireVerifiedDevice?: boolean
 }
 
 function defaultAccess(): Access {
@@ -522,7 +523,10 @@ async function sendEventEncrypted(
   content: Record<string, unknown>,
 ): Promise<string> {
   try {
-    const enc = await encryptIfNeeded(matrixClient, roomId, eventType, content)
+    const access = loadAccess()
+    const enc = await encryptIfNeeded(matrixClient, roomId, eventType, content, {
+      onlyTrustedDevices: access.requireVerifiedDevice,
+    })
     return await matrixClient.sendEvent(roomId, enc.eventType, enc.content)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -1234,8 +1238,10 @@ matrixClient.on('room.event', async (roomId: string, event: Record<string, unkno
   if (event.type !== 'm.room.encrypted') return
   try {
     const result = await decryptRoomEvent(roomId, event)
-    // ShieldColor: Red=0, Grey=1, None=2. Only deliver None (fully verified).
-    if (result.shieldColor !== 2) {
+    // ShieldColor: Red=0, Grey=1, None=2.
+    // When requireVerifiedDevice is true, only deliver fully verified (2).
+    const access = loadAccess()
+    if (access.requireVerifiedDevice && result.shieldColor !== 2) {
       if (!unverifiedNoticeRooms.has(roomId)) {
         unverifiedNoticeRooms.add(roomId)
         try {

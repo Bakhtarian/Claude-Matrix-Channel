@@ -261,6 +261,7 @@ export async function encryptIfNeeded(
   roomId: string,
   eventType: string,
   content: Record<string, unknown>,
+  opts?: { onlyTrustedDevices?: boolean },
 ): Promise<{ eventType: string; content: Record<string, unknown> }> {
   if (!machine) return { eventType, content }
   const encrypted = await isRoomEncrypted(client, roomId)
@@ -268,22 +269,29 @@ export async function encryptIfNeeded(
 
   const m = getOlmMachine()
 
-  // Track room members
+  // Track room members and fetch their device keys
+  // Note: wasm UserId objects are consumed by each call, so we create fresh instances each time
   const members = await client.getJoinedRoomMembers(roomId)
-  const userIds = members.map((uid: string) => new UserId(uid))
-  await m.updateTrackedUsers(userIds)
+  const freshUserIds = () => members.map((uid: string) => new UserId(uid))
 
-  // Claim missing one-time keys
-  const missingSessions = await m.getMissingSessions(userIds)
+  await m.updateTrackedUsers(freshUserIds())
+
+  // Flush KeysQuery so OlmMachine knows about all devices
+  await processOutgoingRequests(client)
+
+  // Claim missing one-time keys to establish Olm sessions
+  const missingSessions = await m.getMissingSessions(freshUserIds())
   if (missingSessions) {
     const resp = await client.doRequest('POST', '/_matrix/client/v3/keys/claim', null, JSON.parse(missingSessions.body))
     await m.markRequestAsSent(missingSessions.id, missingSessions.type, JSON.stringify(resp))
   }
 
-  // Share room key with trusted devices only
+  // Share room key (megolm session)
   const settings = new EncryptionSettings()
-  settings.sharingStrategy = CollectStrategy.onlyTrustedDevices()
-  const shareRequests = await m.shareRoomKey(new RoomId(roomId), userIds, settings)
+  settings.sharingStrategy = opts?.onlyTrustedDevices
+    ? CollectStrategy.onlyTrustedDevices()
+    : CollectStrategy.allDevices()
+  const shareRequests = await m.shareRoomKey(new RoomId(roomId), freshUserIds(), settings)
   for (const req of shareRequests) {
     try {
       await sendCryptoRequest(client, req)
