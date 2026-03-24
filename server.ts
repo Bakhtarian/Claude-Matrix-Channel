@@ -25,6 +25,7 @@ import {
   initCrypto,
   closeCrypto,
   decryptRoomEvent,
+  encryptIfNeeded,
 } from './crypto.js'
 import { randomBytes } from 'crypto'
 import {
@@ -482,6 +483,27 @@ async function assertAllowedRoom(roomId: string): Promise<void> {
   }
 }
 
+async function sendEventEncrypted(
+  roomId: string,
+  eventType: string,
+  content: Record<string, unknown>,
+): Promise<string> {
+  try {
+    const enc = await encryptIfNeeded(matrixClient, roomId, eventType, content)
+    return await matrixClient.sendEvent(roomId, enc.eventType, enc.content)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('trust') || msg.includes('verified') || msg.includes('encrypt')) {
+      process.stderr.write(`matrix channel: encryption failed, sending plaintext notice: ${msg}\n`)
+      return await matrixClient.sendEvent(roomId, 'm.room.message', {
+        msgtype: 'm.notice',
+        body: `[Encryption failed: ${msg}. Verify devices with /matrix:verify]`,
+      })
+    }
+    throw err
+  }
+}
+
 mcp.setRequestHandler(CallToolRequestSchema, async req => {
   const args = (req.params.arguments ?? {}) as Record<string, unknown>
   try {
@@ -529,7 +551,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
               'm.in_reply_to': { event_id: reply_to },
             }
           }
-          const eventId = await matrixClient.sendEvent(room_id, 'm.room.message', content)
+          const eventId = await sendEventEncrypted(room_id, 'm.room.message', content)
           noteSent(eventId)
           sentIds.push(eventId)
         }
@@ -555,7 +577,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
             url: mxcUrl,
             info: { mimetype: contentType, size: data.length },
           }
-          const fileEventId = await matrixClient.sendEvent(room_id, 'm.room.message', fileContent)
+          const fileEventId = await sendEventEncrypted(room_id, 'm.room.message', fileContent)
           noteSent(fileEventId)
           sentIds.push(fileEventId)
         }
@@ -573,7 +595,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const emoji = args.emoji as string
 
         await assertAllowedRoom(room_id)
-        await matrixClient.sendEvent(room_id, 'm.reaction', {
+        await sendEventEncrypted(room_id, 'm.reaction', {
           'm.relates_to': {
             rel_type: 'm.annotation',
             event_id,
@@ -609,7 +631,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           content.format = 'org.matrix.custom.html'
           content.formatted_body = `* ${html}`
         }
-        const editId = await matrixClient.sendEvent(room_id, 'm.room.message', content)
+        const editId = await sendEventEncrypted(room_id, 'm.room.message', content)
         return { content: [{ type: 'text', text: `edited (id: ${editId})` }] }
       }
 

@@ -10,6 +10,8 @@ import {
   TrustRequirement,
   RoomId,
   ShieldColor,
+  EncryptionSettings,
+  CollectStrategy,
   type OutgoingRequest,
   type ProcessedToDeviceEvent,
 } from '@matrix-org/matrix-sdk-crypto-wasm'
@@ -229,6 +231,58 @@ export async function decryptRoomEvent(
     event: clearEvent,
     shieldColor: shield.color,
     shieldMessage: shield.message ?? undefined,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Outbound encryption
+// ---------------------------------------------------------------------------
+
+export async function encryptIfNeeded(
+  client: MatrixClient,
+  roomId: string,
+  eventType: string,
+  content: Record<string, unknown>,
+): Promise<{ eventType: string; content: Record<string, unknown> }> {
+  if (!machine) return { eventType, content }
+  const encrypted = await isRoomEncrypted(client, roomId)
+  if (!encrypted) return { eventType, content }
+
+  const m = getOlmMachine()
+
+  // Track room members
+  const members = await client.getJoinedRoomMembers(roomId)
+  const userIds = members.map((uid: string) => new UserId(uid))
+  await m.updateTrackedUsers(userIds)
+
+  // Claim missing one-time keys
+  const missingSessions = await m.getMissingSessions(userIds)
+  if (missingSessions) {
+    const resp = await client.doRequest('POST', '/_matrix/client/v3/keys/claim', null, JSON.parse(missingSessions.body))
+    await m.markRequestAsSent(missingSessions.id, missingSessions.type, JSON.stringify(resp))
+  }
+
+  // Share room key with trusted devices only
+  const settings = new EncryptionSettings()
+  settings.sharingStrategy = CollectStrategy.onlyTrustedDevices()
+  const shareRequests = await m.shareRoomKey(new RoomId(roomId), userIds, settings)
+  for (const req of shareRequests) {
+    try {
+      await sendCryptoRequest(client, req)
+    } catch (err) {
+      process.stderr.write(`matrix channel: shareRoomKey request failed: ${err}\n`)
+    }
+  }
+
+  // Encrypt the event
+  const encryptedPayload = await m.encryptRoomEvent(
+    new RoomId(roomId),
+    eventType,
+    JSON.stringify(content),
+  )
+  return {
+    eventType: 'm.room.encrypted',
+    content: JSON.parse(encryptedPayload),
   }
 }
 
