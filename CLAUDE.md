@@ -15,6 +15,8 @@ Matrix (Element) messaging channel for Claude Code, implemented as an MCP server
 | File | Purpose |
 |------|---------|
 | `server.ts` | MCP server, Matrix sync, message gating, tool handlers, permission relay |
+| `lib.ts` | Pure/testable logic: `chunk`, `defaultAccess`, `pruneExpired`, `checkMention`, `evaluateGate` |
+| `lib.test.ts` | Unit tests (Bun test runner) |
 | `crypto.ts` | OlmMachine lifecycle, encrypt/decrypt, sync integration, `CryptoMatrixClient` |
 | `.mcp.json` | MCP server config — runs `bun server.ts` |
 | `ACCESS.md` | Full access control schema and documentation |
@@ -103,6 +105,9 @@ Skills use `user-invocable: true` (hyphen, not underscore). They are registered 
 ```sh
 bun install                    # install deps
 bunx tsc --noEmit              # type check
+bunx biome check .             # lint & format check
+bun test                       # run unit tests
+bun run check                  # type check + lint (combined)
 bun server.ts                  # run server directly
 ```
 

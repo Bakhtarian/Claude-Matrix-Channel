@@ -274,3 +274,14 @@ You can also set `MATRIX_RUNTIME` in your shell and use the npm start script: `M
 **"unverified" notice in an encrypted room** — This only appears when `requireVerifiedDevice` is `true` in `access.json`. Either verify the bot's device (Element or `/matrix:verify`), or set `"requireVerifiedDevice": false` to accept messages from unverified devices.
 
 **"array contains a value of the wrong type"** — This is a wasm ownership error in `@matrix-org/matrix-sdk-crypto-wasm`. The `UserId` objects passed to OlmMachine methods are consumed (freed) by each call. If you see this, ensure fresh `UserId` instances are created for each wasm method call rather than reusing objects.
+
+## Development
+
+```sh
+bun install            # install deps
+bun test               # run unit tests
+bun run check          # type check + lint
+bun run format         # auto-fix formatting
+```
+
+CI runs on every push and PR via GitHub Actions (type check, Biome lint, tests).

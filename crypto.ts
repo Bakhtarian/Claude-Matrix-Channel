@@ -1,26 +1,23 @@
 import 'fake-indexeddb/auto'
 
 import {
-  OlmMachine,
-  UserId,
+  CollectStrategy,
+  DecryptionSettings,
   DeviceId,
   DeviceLists,
-  RequestType,
-  DecryptionSettings,
-  TrustRequirement,
-  RoomId,
-  ShieldColor,
   EncryptionSettings,
-  CollectStrategy,
-  VerificationMethod,
+  OlmMachine,
   type OutgoingRequest,
   type ProcessedToDeviceEvent,
+  RequestType,
+  RoomId,
+  ShieldColor,
+  TrustRequirement,
+  UserId,
+  VerificationMethod,
 } from '@matrix-org/matrix-sdk-crypto-wasm'
 
-import {
-  MatrixClient,
-  SimpleFsStorageProvider,
-} from 'matrix-bot-sdk'
+import { MatrixClient } from 'matrix-bot-sdk'
 
 // ---------------------------------------------------------------------------
 // OlmMachine lifecycle
@@ -28,16 +25,8 @@ import {
 
 let machine: OlmMachine | null = null
 
-export async function initCrypto(
-  botUserId: string,
-  deviceId: string,
-  storeName: string,
-): Promise<void> {
-  machine = await OlmMachine.initialize(
-    new UserId(botUserId),
-    new DeviceId(deviceId),
-    storeName,
-  )
+export async function initCrypto(botUserId: string, deviceId: string, storeName: string): Promise<void> {
+  machine = await OlmMachine.initialize(new UserId(botUserId), new DeviceId(deviceId), storeName)
   process.stderr.write(`matrix channel: crypto initialised (device ${deviceId})\n`)
 }
 
@@ -54,10 +43,7 @@ export function getOlmMachine(): OlmMachine {
 // Outgoing crypto request dispatch
 // ---------------------------------------------------------------------------
 
-export async function sendCryptoRequest(
-  client: MatrixClient,
-  req: OutgoingRequest,
-): Promise<void> {
+export async function sendCryptoRequest(client: MatrixClient, req: OutgoingRequest): Promise<void> {
   let response: string
 
   switch (req.type) {
@@ -70,8 +56,11 @@ export async function sendCryptoRequest(
         // In-memory crypto store means OTKs regenerate each restart.
         // If the server already has keys for this device, retry without OTKs
         // so device_keys still get uploaded.
-        if (body.one_time_keys && Object.keys(body.one_time_keys).length > 0 &&
-            String(err).includes('already exists')) {
+        if (
+          body.one_time_keys &&
+          Object.keys(body.one_time_keys).length > 0 &&
+          String(err).includes('already exists')
+        ) {
           const res = await client.doRequest('POST', '/_matrix/client/v3/keys/upload', null, {
             ...body,
             one_time_keys: {},
@@ -101,7 +90,12 @@ export async function sendCryptoRequest(
       break
     }
     case RequestType.SignatureUpload: {
-      const res = await client.doRequest('POST', '/_matrix/client/v3/keys/signatures/upload', null, JSON.parse(req.body))
+      const res = await client.doRequest(
+        'POST',
+        '/_matrix/client/v3/keys/signatures/upload',
+        null,
+        JSON.parse(req.body),
+      )
       response = JSON.stringify(res)
       break
     }
@@ -191,11 +185,10 @@ export async function feedCryptoSync(raw: any): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export class CryptoMatrixClient extends MatrixClient {
-  constructor(homeserverUrl: string, accessToken: string, storage?: SimpleFsStorageProvider) {
-    super(homeserverUrl, accessToken, storage)
-  }
-
-  protected async processSync(raw: any, emitFn?: (emitEventType: string, ...payload: any[]) => Promise<any>): Promise<any> {
+  protected async processSync(
+    raw: any,
+    emitFn?: (emitEventType: string, ...payload: any[]) => Promise<any>,
+  ): Promise<any> {
     // Feed crypto BEFORE the base class processes the sync
     if (machine) {
       try {
@@ -233,10 +226,7 @@ export type DecryptionResult = {
   shieldMessage?: string
 }
 
-export async function decryptRoomEvent(
-  roomId: string,
-  event: Record<string, unknown>,
-): Promise<DecryptionResult> {
+export async function decryptRoomEvent(roomId: string, event: Record<string, unknown>): Promise<DecryptionResult> {
   const m = getOlmMachine()
   const decrypted = await m.decryptRoomEvent(
     JSON.stringify(event),
@@ -301,17 +291,13 @@ export async function encryptIfNeeded(
   }
 
   // Encrypt the event
-  const encryptedPayload = await m.encryptRoomEvent(
-    new RoomId(roomId),
-    eventType,
-    JSON.stringify(content),
-  )
+  const encryptedPayload = await m.encryptRoomEvent(new RoomId(roomId), eventType, JSON.stringify(content))
   return {
     eventType: 'm.room.encrypted',
     content: JSON.parse(encryptedPayload),
   }
 }
 
-// Re-export types that server.ts may need
-export { RequestType, TrustRequirement, ShieldColor, VerificationMethod }
 export type { OlmMachine, OutgoingRequest, ProcessedToDeviceEvent }
+// Re-export types that server.ts may need
+export { RequestType, ShieldColor, TrustRequirement, VerificationMethod }
