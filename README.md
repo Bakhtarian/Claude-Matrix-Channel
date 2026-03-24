@@ -223,7 +223,15 @@ accounts), inbox, sync storage.
 
 ## Alternative Runtimes
 
-The server defaults to Bun but can run on other TypeScript runtimes. Override the command in `.mcp.json`:
+The server defaults to Bun but can run on other TypeScript runtimes. The easiest way to switch is:
+
+```
+/matrix:configure runtime npx-tsx
+```
+
+Supported values: `bun` (default), `npx-tsx`, `deno`. This updates the plugin's `.mcp.json` automatically.
+
+You can also edit `.mcp.json` manually:
 
 **Using `npx tsx`:**
 ```json
