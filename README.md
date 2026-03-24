@@ -1,8 +1,16 @@
 # Matrix Channel for Claude Code
 
-Connect a Matrix bot to your Claude Code session with an MCP server.
+Chat with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) from any [Matrix](https://matrix.org) client — [Element](https://element.io), Element X, FluffyChat, or any other Matrix-compatible app.
 
-When the bot receives a message, the MCP server forwards it to Claude and provides tools to reply, react, edit messages, fetch history, and download attachments.
+This MCP server connects a Matrix bot to your Claude Code session. When someone messages the bot, Claude receives it and can reply, react, edit messages, fetch history, and download attachments — all through Matrix.
+
+**Features:**
+- End-to-end encryption (E2EE) with automatic key management
+- Access control with pairing codes, allowlists, and per-room policies
+- Works in DMs and group rooms (with optional @mention triggering)
+- File attachments (send and receive)
+- Device verification (SAS emoji) and local trust
+- Configurable runtime (Bun, npx tsx, Deno)
 
 ## Prerequisites
 

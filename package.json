@@ -1,7 +1,24 @@
 {
   "name": "claude-channel-matrix",
+  "description": "Matrix/Element messaging channel for Claude Code — MCP server with E2EE, access control, and device verification",
   "version": "0.0.1",
   "license": "Apache-2.0",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "matrix",
+    "element",
+    "mcp",
+    "mcp-server",
+    "chatbot",
+    "messaging",
+    "e2ee",
+    "encryption",
+    "channel",
+    "bot",
+    "ai",
+    "anthropic"
+  ],
   "type": "module",
   "bin": "./server.ts",
   "scripts": {
