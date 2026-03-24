@@ -155,10 +155,13 @@ Configure outbound behavior with `/matrix:access set <key> <value>`.
 
 ## Encryption
 
-**E2EE is not supported.** The bot cannot read messages in encrypted rooms. Element defaults to encrypting DMs, so you must create an unencrypted room:
+E2EE is supported. The bot works in both encrypted and unencrypted rooms.
 
-1. In Element: **Create new room** → toggle off **"Enable end-to-end encryption"**
-2. Invite your bot account to the room
-3. Start a conversation
+For encrypted rooms, you must verify the bot's device before messages are delivered:
 
-Future versions may add E2EE support via `@matrix-org/matrix-sdk-crypto-nodejs`.
+1. **From Element:** Go to the bot user's profile → Sessions → Click the bot's device → Verify
+2. **From the terminal:** Run `/matrix:verify` to interactively complete SAS (emoji) verification
+
+Until verified, messages in encrypted rooms are dropped and the bot sends a one-time notice per room explaining the verification requirement.
+
+The bot enforces strict verification: only messages from verified devices are processed. If a user's device becomes unverified (e.g., new device, reset keys), they need to re-verify.

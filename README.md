@@ -10,14 +10,15 @@ When the bot receives a message, the MCP server forwards it to Claude and provid
 - A Matrix homeserver you have access to (e.g. your own Synapse instance, or matrix.org)
 - A dedicated Matrix account for the bot
 
-## Important: No E2EE Support
+## End-to-End Encryption
 
-This channel does **not** support end-to-end encrypted rooms. Most Matrix clients (including Element) default to encrypting DMs, so you **cannot** just DM the bot directly — the room would be encrypted and the bot won't see your messages.
+E2EE is supported. The bot works in both encrypted and unencrypted rooms. For encrypted rooms, you must verify the bot's device before messages will be delivered.
 
-Instead, you must **create an unencrypted room** and invite the bot to it:
+**To verify the bot's device:**
+- From Element: Go to the bot user's profile → Sessions → Click the bot's device → Verify
+- From the terminal: Run `/matrix:verify` to interactively verify devices
 
-- In Element: **Create new room** → toggle off **"Enable end-to-end encryption"**
-- Or use the Matrix API to create a room with `"preset": "public_chat"` and `"visibility": "private"` (public_chat preset does not enable encryption)
+Until the bot's device is verified, messages in encrypted rooms are dropped and the bot sends a notice explaining what to do.
 
 ## Quick Setup
 
@@ -73,9 +74,9 @@ chmod 600 ~/.claude/channels/matrix/.env
 
 Replace `https://your-homeserver` and the access token with your actual values from steps 1-2.
 
-### 5. Create an unencrypted room and invite the bot
+### 5. Create a room and invite the bot
 
-You **must** create an unencrypted room — DMs won't work because they're encrypted by default.
+Create a room and invite the bot. Both encrypted and unencrypted rooms work. For encrypted rooms, you'll need to verify the bot's device after setup (see "End-to-End Encryption" above).
 
 **Using the Matrix API** (replace the homeserver URL and your access token):
 
@@ -214,9 +215,9 @@ accounts), inbox, sync storage.
 **"Failed to reconnect to matrix"** — Check your credentials in `~/.claude/channels/matrix/.env`. Verify the homeserver URL is correct and the access token is valid.
 
 **Bot doesn't respond to messages** — Check that:
-1. The room is **not encrypted** (this is the most common issue)
+1. If the room is encrypted, verify the bot's device (see "End-to-End Encryption")
 2. Your user ID is in the `allowFrom` list in `access.json`
 3. The room ID is in the `rooms` section of `access.json`
 4. If `requireMention` is `true`, you need to @mention the bot
 
-**"E2EE not supported" in logs** — The room is encrypted. Create a new unencrypted room instead (see step 5).
+**"unverified" notice in an encrypted room** — Verify the bot's device from Element or run `/matrix:verify` in the terminal.
