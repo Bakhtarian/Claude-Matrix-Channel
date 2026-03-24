@@ -1,6 +1,6 @@
 ---
 name: verify
-description: Interactively verify a Matrix device using SAS emoji comparison for E2EE. Lists pending verification requests or initiates one.
+description: "Interactively verify a Matrix device using SAS emoji comparison for E2EE. Lists pending verification requests or initiates one."
 user-invocable: true
 allowed-tools:
   - Read

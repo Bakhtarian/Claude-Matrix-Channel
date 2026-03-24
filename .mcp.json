@@ -2,8 +2,7 @@
   "mcpServers": {
     "matrix": {
       "command": "bun",
-      "args": ["server.ts"],
-      "cwd": "/Users/zirak/projects/claude-matrix-channel"
+      "args": ["server.ts"]
     }
   }
 }

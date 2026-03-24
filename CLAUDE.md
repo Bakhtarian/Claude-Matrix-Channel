@@ -66,6 +66,8 @@ All runtime state lives in `~/.claude/channels/matrix/` (override with `MATRIX_S
 - `decryptRoomEvent()` returns shield color: 0=Red/unverified, 1=Grey/partial, 2=None/verified
 - Unverified devices get a one-time notice per room explaining how to verify
 - Verification uses SAS (emoji comparison) via `/matrix:verify` skill
+- **Crypto store is in-memory** (`fake-indexeddb`): OlmMachine state is lost between restarts. One-time keys regenerate each run; `KeysUpload` handles "already exists" conflicts by retrying without OTKs.
+- **Device ID** is fetched from the homeserver's `/whoami` endpoint at startup (not generated locally)
 
 ## Skills (SKILL.md frontmatter)
 
@@ -84,9 +86,13 @@ Skills use `user-invocable: true` (hyphen, not underscore). They are registered 
 
 **"Failed to reconnect to matrix"**: Check `~/.claude/channels/matrix/.env` — homeserver URL and access token must be valid.
 
+**"One time key already exists"**: Expected on restart since the crypto store is in-memory. The `KeysUpload` handler retries without OTKs automatically. Device keys still upload successfully.
+
 **Skills not found after install**: Ensure `user-invocable: true` uses a hyphen. Run `/reload-plugins` after installing.
 
 **Type errors**: Run `bunx tsc --noEmit` to check. The project uses strict TypeScript.
+
+**Creating a new bot account**: Registration is typically disabled on homeservers. Use SSH and Synapse admin tools inside the Docker container, or the admin API with an admin-level access token.
 
 ## Development
 

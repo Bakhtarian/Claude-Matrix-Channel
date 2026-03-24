@@ -62,8 +62,25 @@ export async function sendCryptoRequest(
 
   switch (req.type) {
     case RequestType.KeysUpload: {
-      const res = await client.doRequest('POST', '/_matrix/client/v3/keys/upload', null, JSON.parse(req.body))
-      response = JSON.stringify(res)
+      const body = JSON.parse(req.body)
+      try {
+        const res = await client.doRequest('POST', '/_matrix/client/v3/keys/upload', null, body)
+        response = JSON.stringify(res)
+      } catch (err: any) {
+        // In-memory crypto store means OTKs regenerate each restart.
+        // If the server already has keys for this device, retry without OTKs
+        // so device_keys still get uploaded.
+        if (body.one_time_keys && Object.keys(body.one_time_keys).length > 0 &&
+            String(err).includes('already exists')) {
+          const res = await client.doRequest('POST', '/_matrix/client/v3/keys/upload', null, {
+            ...body,
+            one_time_keys: {},
+          })
+          response = JSON.stringify(res)
+        } else {
+          throw err
+        }
+      }
       break
     }
     case RequestType.KeysQuery: {

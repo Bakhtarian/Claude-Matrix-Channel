@@ -19,6 +19,7 @@ import { z } from 'zod'
 import {
   MatrixClient,
   SimpleFsStorageProvider,
+  AutojoinRoomsMixin,
 } from 'matrix-bot-sdk'
 import {
   CryptoMatrixClient,
@@ -305,18 +306,18 @@ async function gate(
     return { action: 'drop' }
   }
   const requireMention = policy.requireMention ?? true
-  if (requireMention && !isMentioned(client, eventContent, access.mentionPatterns)) {
+  if (requireMention && !(await isMentioned(client, eventContent, access.mentionPatterns))) {
     return { action: 'drop' }
   }
   return { action: 'deliver', access }
 }
 
-function isMentioned(
+async function isMentioned(
   client: MatrixClient,
   content: Record<string, unknown>,
   extraPatterns?: string[],
-): boolean {
-  const userId = client.getUserId()
+): Promise<boolean> {
+  const userId = await client.getUserId()
   const body = (content.body as string) ?? ''
 
   // Check for Matrix mention (userId in body or formatted_body)
@@ -476,19 +477,21 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       name: 'verify_device',
       description:
         'Manage E2EE device verification. Actions: "status" shows bot device info and pending requests; ' +
+        '"initiate" sends a verification request to a user\'s device (bot-initiated); ' +
         '"accept" accepts a pending verification request and starts SAS; ' +
-        '"confirm" confirms the emoji match; "cancel" cancels verification.',
+        '"confirm" confirms the emoji match; "cancel" cancels verification; ' +
+        '"trust" locally trusts all devices for a user (bypasses SAS).',
       inputSchema: {
         type: 'object' as const,
         properties: {
           action: {
             type: 'string',
-            enum: ['status', 'accept', 'confirm', 'cancel'],
+            enum: ['status', 'initiate', 'accept', 'confirm', 'cancel', 'trust'],
             description: 'The verification action to perform.',
           },
           user_id: {
             type: 'string',
-            description: 'Matrix user ID for the verification. Required for accept.',
+            description: 'Matrix user ID for the verification. Required for initiate and accept.',
           },
         },
         required: ['action'],
@@ -564,7 +567,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
 
         // Stop typing indicator now that we're replying
         try {
-          await matrixClient.sendTyping(room_id, false)
+          await matrixClient.setTyping(room_id, false)
         } catch {}
 
         for (let i = 0; i < chunks.length; i++) {
@@ -670,7 +673,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const limit = Math.min((args.limit as number) ?? 20, 100)
 
         await assertAllowedRoom(room_id)
-        const botUserId = matrixClient.getUserId()
+        const botUserId = await matrixClient.getUserId()
 
         // Fetch messages using /messages endpoint (backward direction = most recent)
         const response = await matrixClient.doRequest(
@@ -812,6 +815,62 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           return { content: [{ type: 'text', text: lines.join('\n') }] }
         }
 
+        if (action === 'initiate') {
+          // Bot-initiated verification: send request to target user's device(s)
+          if (!userId) {
+            return { content: [{ type: 'text', text: 'user_id is required for initiate action' }], isError: true }
+          }
+
+          const { UserId } = await import('@matrix-org/matrix-sdk-crypto-wasm')
+
+          // Step 1: Track the user so OlmMachine fetches their keys
+          try {
+            await m.updateTrackedUsers([new UserId(userId)])
+          } catch (e) {
+            return { content: [{ type: 'text', text: `Failed at updateTrackedUsers: ${e}` }], isError: true }
+          }
+
+          try {
+            await processOutgoingRequests(matrixClient)
+          } catch (e) {
+            return { content: [{ type: 'text', text: `Failed at processOutgoingRequests: ${e}` }], isError: true }
+          }
+
+          // Step 2: Get devices
+          let devices: import('@matrix-org/matrix-sdk-crypto-wasm').Device[]
+          try {
+            const userDevices = await m.getUserDevices(new UserId(userId))
+            devices = userDevices.devices()
+          } catch (e) {
+            return { content: [{ type: 'text', text: `Failed at getUserDevices: ${e}` }], isError: true }
+          }
+
+          if (devices.length === 0) {
+            return { content: [{ type: 'text', text: `No known devices for ${userId}. They may need to send a message in an encrypted room first.` }] }
+          }
+
+          // Step 3: Pick target device and initiate
+          const target = devices.find(d => !d.isVerified()) ?? devices[0]
+          const targetDeviceId = target.deviceId.toString()
+
+          try {
+            const [verificationRequest, toDeviceRequest] = target.requestVerification([VerificationMethod.SasV1])
+            activeVerificationRequest = verificationRequest
+            await sendCryptoRequest(matrixClient, toDeviceRequest)
+            await processOutgoingRequests(matrixClient)
+          } catch (e) {
+            return { content: [{ type: 'text', text: `Failed at requestVerification for device ${targetDeviceId}: ${e}` }], isError: true }
+          }
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Verification request sent to ${userId} device ${targetDeviceId}.\n` +
+                `They should see a verification prompt in Element. Once they accept, use "status" to see the SAS emoji.`,
+            }],
+          }
+        }
+
         if (action === 'accept') {
           // Look for pending verification requests
           if (!userId) {
@@ -894,6 +953,38 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           return { content: [{ type: 'text', text: 'Verification cancelled.' }] }
         }
 
+        if (action === 'trust') {
+          // Locally trust all devices for a user (bypasses SAS)
+          if (!userId) {
+            return { content: [{ type: 'text', text: 'user_id is required for trust action' }], isError: true }
+          }
+
+          const { UserId, LocalTrust } = await import('@matrix-org/matrix-sdk-crypto-wasm')
+          await m.updateTrackedUsers([new UserId(userId)])
+          await processOutgoingRequests(matrixClient)
+
+          const userDevices = await m.getUserDevices(new UserId(userId))
+          const devices = userDevices.devices()
+
+          if (devices.length === 0) {
+            return { content: [{ type: 'text', text: `No known devices for ${userId}.` }], isError: true }
+          }
+
+          const trusted: string[] = []
+          for (const d of devices) {
+            if (!d.isLocallyTrusted()) {
+              await d.setLocalTrust(LocalTrust.Verified)
+              trusted.push(d.deviceId.toString())
+            }
+          }
+
+          if (trusted.length === 0) {
+            return { content: [{ type: 'text', text: `All ${devices.length} device(s) for ${userId} are already trusted.` }] }
+          }
+
+          return { content: [{ type: 'text', text: `Locally trusted ${trusted.length} device(s) for ${userId}: ${trusted.join(', ')}. Encrypted messages should now be delivered.` }] }
+        }
+
         return { content: [{ type: 'text', text: `Unknown verify action: ${action}` }], isError: true }
       }
 
@@ -936,6 +1027,7 @@ mkdirSync(BOT_STORE_DIR, { recursive: true })
 const storage = new SimpleFsStorageProvider(join(BOT_STORE_DIR, 'bot.json'))
 
 matrixClient = new CryptoMatrixClient(HOMESERVER_URL, ACCESS_TOKEN, storage)
+AutojoinRoomsMixin.setupOnClient(matrixClient)
 
 const startupTimestamp = Date.now()
 let botUserId: string
@@ -1088,7 +1180,7 @@ matrixClient.on('room.message', async (roomId: string, event: Record<string, unk
 
     // Typing indicator
     try {
-      await matrixClient.sendTyping(roomId, true, 30000)
+      await matrixClient.setTyping(roomId, true, 30000)
     } catch {}
 
     // Ack reaction
@@ -1175,8 +1267,14 @@ try {
   process.stderr.write(`matrix channel: connecting as ${botUserId}\n`)
 
   try {
-    const deviceId = 'CLAUDE_' + Buffer.from(BOT_STORE_DIR).toString('base64url').slice(0, 12).toUpperCase()
+    const whoami = await matrixClient.doRequest('GET', '/_matrix/client/v3/account/whoami')
+    const deviceId = whoami.device_id
+    if (!deviceId) throw new Error('Homeserver did not return a device_id — access token may not be device-bound')
+
     await initCrypto(botUserId, deviceId, 'claude-matrix-crypto')
+    // Upload device keys to the server so other clients can discover and trust this device
+    await processOutgoingRequests(matrixClient)
+    process.stderr.write(`matrix channel: device keys uploaded\n`)
   } catch (err) {
     process.stderr.write(`matrix channel: E2EE init failed (encrypted rooms won't work): ${err}\n`)
   }

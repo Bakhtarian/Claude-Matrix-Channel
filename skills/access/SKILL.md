@@ -1,6 +1,6 @@
 ---
 name: access
-description: Manage Matrix channel access — approve pairings, edit allowlists, set DM/room policy. Use when the user asks to pair, approve someone, check who's allowed, or change policy for the Matrix channel.
+description: "Manage Matrix channel access — approve pairings, edit allowlists, set DM/room policy. Use when the user asks to pair, approve someone, check who's allowed, or change policy for the Matrix channel."
 user-invocable: true
 allowed-tools:
   - Read
