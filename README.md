@@ -54,12 +54,21 @@ The response includes `access_token` — save it, you'll need it in step 4.
 ### 3. Clone and install
 
 ```sh
-git clone https://github.com/YOUR_USERNAME/claude-matrix-channel.git
-cd claude-matrix-channel
+git clone https://github.com/Bakhtarian/Claude-Matrix-Channel.git
+cd Claude-Matrix-Channel
 bun install
 ```
 
-### 4. Configure credentials
+### 4. Install the Claude Code plugin
+
+Register the marketplace and install the plugin to get the `/matrix:access`, `/matrix:configure`, and `/matrix:verify` skills:
+
+```
+/plugin marketplace add Bakhtarian/Claude-Matrix-Channel
+/plugin install matrix@matrix-channel
+```
+
+### 5. Configure credentials
 
 Create the credentials file:
 
@@ -74,7 +83,7 @@ chmod 600 ~/.claude/channels/matrix/.env
 
 Replace `https://your-homeserver` and the access token with your actual values from steps 1-2.
 
-### 5. Create a room and invite the bot
+### 6. Create a room and invite the bot
 
 Create a room and invite the bot. Both encrypted and unencrypted rooms work. For encrypted rooms, you'll need to verify the bot's device after setup (see "End-to-End Encryption" above).
 
@@ -110,7 +119,7 @@ The bot will auto-join when the server starts. You can also create the room usin
 4. Create the room
 5. Invite `@mybotname:your-homeserver`
 
-### 6. Configure access control
+### 7. Configure access control
 
 Create the access control file. Replace the user ID and room ID with your actual values:
 
@@ -136,7 +145,7 @@ EOF
 
 To find your room ID in Element: **Room Settings → Advanced → Internal room ID**.
 
-### 7. Launch Claude Code with the channel
+### 8. Launch Claude Code with the channel
 
 From the `claude-matrix-channel` directory:
 

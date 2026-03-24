@@ -1,0 +1,14 @@
+{
+  "name": "matrix-channel",
+  "owner": {
+    "name": "Bakhtarian"
+  },
+  "plugins": [
+    {
+      "name": "matrix",
+      "source": "./",
+      "description": "Matrix channel for Claude Code — messaging bridge with E2EE support and built-in access control.",
+      "version": "0.0.1"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 ---
 name: verify
 description: Interactively verify a Matrix device using SAS (emoji comparison) for E2EE. Lists pending verification requests or initiates one.
-user_invocable: true
+user-invocable: true
 arguments: "[optional @user:server to verify]"
 ---
 
