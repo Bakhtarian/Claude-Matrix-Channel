@@ -2,6 +2,12 @@
   "name": "matrix",
   "description": "Matrix/Element messaging channel for Claude Code — chat with Claude from any Matrix client with E2EE support, access control, and device verification.",
   "version": "0.0.1",
+  "author": {
+    "name": "Bakhtarian"
+  },
+  "homepage": "https://github.com/Bakhtarian/Claude-Matrix-Channel",
+  "repository": "https://github.com/Bakhtarian/Claude-Matrix-Channel",
+  "license": "Apache-2.0",
   "keywords": [
     "matrix",
     "element",
