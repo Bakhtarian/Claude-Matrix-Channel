@@ -55,10 +55,9 @@ to `allowlist`:
 4. If no, people are missing → *"Have them DM the bot; you'll approve each
    with `/matrix:access pair <code>`."*
 
-**E2EE Warning:** Always mention that E2EE is not supported. If using Element,
-the user must create an unencrypted room for the bot:
-- In Element: Create new room → disable "Enable end-to-end encryption"
-- Or use a room on a homeserver where encryption is not the default
+**E2EE Note:** E2EE is supported. Both encrypted and unencrypted rooms work.
+For encrypted rooms, the bot's device must be verified before messages are
+delivered. Mention `/matrix:verify` for device verification.
 
 ### `<homeserver_url> <access_token>` — save credentials
 
