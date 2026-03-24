@@ -5,6 +5,7 @@ user-invocable: true
 allowed-tools:
   - Read
   - Write
+  - Glob
   - Bash(ls *)
   - Bash(mkdir *)
   - Bash(chmod *)
@@ -29,14 +30,19 @@ Read both state files and give the user a complete picture:
    `MATRIX_HOMESERVER_URL` and `MATRIX_ACCESS_TOKEN`. Show set/not-set;
    if set, show homeserver URL and first 6 chars of token masked.
 
-2. **Access** — read `~/.claude/channels/matrix/access.json` (missing file
+2. **Runtime** — read the plugin `.mcp.json` (check `$CLAUDE_PLUGIN_ROOT/.mcp.json`,
+   then `~/.claude/plugins/cache/matrix-channel/matrix/**/.mcp.json`,
+   then `./.mcp.json`). Show the current `command` value (e.g. `bun`).
+   Mention `/matrix:configure runtime <bun|npx-tsx|deno>` to change.
+
+3. **Access** — read `~/.claude/channels/matrix/access.json` (missing file
    = defaults: `dmPolicy: "pairing"`, empty allowlist). Show:
    - DM policy and what it means in one line
    - Allowed senders: count, and list user IDs
    - Pending pairings: count, with codes and sender IDs if any
    - Rooms opted in: count
 
-3. **What next** — end with a concrete next step based on state:
+4. **What next** — end with a concrete next step based on state:
    - No credentials → *"Run `/matrix:configure <homeserver_url> <access_token>`
      with your bot's homeserver URL and access token."*
    - Credentials set, policy is pairing, nobody allowed → *"DM your bot on
@@ -56,8 +62,9 @@ to `allowlist`:
    with `/matrix:access pair <code>`."*
 
 **E2EE Note:** E2EE is supported. Both encrypted and unencrypted rooms work.
-For encrypted rooms, the bot's device must be verified before messages are
-delivered. Mention `/matrix:verify` for device verification.
+By default the bot accepts messages from unverified devices. For stricter
+security, set `requireVerifiedDevice` to `true` in `access.json` — then
+device verification is required. Mention `/matrix:verify` for verification.
 
 ### `<homeserver_url> <access_token>` — save credentials
 
@@ -71,6 +78,31 @@ delivered. Mention `/matrix:verify` for device verification.
 **How to get an access token:**
 - Element: Settings → Help & About → Access Token (at the bottom)
 - Or create a dedicated bot account and use the login API
+
+### `runtime <bun|npx-tsx|deno>` — change the TypeScript runtime
+
+Updates the `.mcp.json` in the plugin directory to use a different runtime.
+The server needs a restart after changing.
+
+Supported values and their `.mcp.json` mappings:
+
+| Value | command | args |
+|-------|---------|------|
+| `bun` (default) | `bun` | `["server.ts"]` |
+| `npx-tsx` | `npx` | `["tsx", "server.ts"]` |
+| `deno` | `deno` | `["run", "--allow-all", "server.ts"]` |
+
+Steps:
+1. Find the plugin `.mcp.json`. Check these locations in order:
+   - `$CLAUDE_PLUGIN_ROOT/.mcp.json` (if env var is set)
+   - `~/.claude/plugins/cache/matrix-channel/matrix/**/.mcp.json`
+   - `./.mcp.json` (development fallback)
+2. Read the current `.mcp.json`, preserve the `cwd` field if present.
+3. Update `command` and `args` per the table above.
+4. Write back with the Write tool.
+5. Confirm: *"Runtime changed to `<value>`. Restart the session for it to take effect."*
+
+If the user passes an unrecognized value, list the supported options.
 
 ### `clear` — remove credentials
 
