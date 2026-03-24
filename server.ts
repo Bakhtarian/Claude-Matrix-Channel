@@ -646,9 +646,24 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
         const response = await matrixClient.doRequest(
           'GET',
           `/_matrix/client/v3/rooms/${encodeURIComponent(room_id)}/messages`,
-          { dir: 'b', limit: String(limit), filter: JSON.stringify({ types: ['m.room.message'] }) },
+          { dir: 'b', limit: String(limit), filter: JSON.stringify({ types: ['m.room.message', 'm.room.encrypted'] }) },
         )
         const events = (response.chunk ?? []).reverse() // oldest first
+
+        // Decrypt encrypted events
+        for (const e of events) {
+          if ((e as any).type === 'm.room.encrypted') {
+            try {
+              const result = await decryptRoomEvent(room_id, e as Record<string, unknown>)
+              ;(e as any).type = result.event.type ?? 'm.room.message'
+              ;(e as any).content = result.event.content
+            } catch {
+              ;(e as any).type = 'm.room.message'
+              ;(e as any).content = { body: '[unable to decrypt]', msgtype: 'm.notice' }
+            }
+          }
+        }
+
         if (events.length === 0) {
           return { content: [{ type: 'text', text: '(no messages)' }] }
         }
@@ -683,16 +698,40 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
           return { content: [{ type: 'text', text: 'message has no downloadable attachment' }] }
         }
 
-        const data = await matrixClient.downloadContent(mxcUrl)
+        const rawData = await matrixClient.downloadContent(mxcUrl)
+        const fileField = content.file as { url: string; key: any; iv: string; hashes: any; v: string } | undefined
+
+        let fileData: Buffer
+        if (fileField?.key && fileField?.iv) {
+          // Encrypted attachment — try SDK first, fall back to manual AES-CTR
+          try {
+            const { Attachment, EncryptedAttachment } = await import('@matrix-org/matrix-sdk-crypto-wasm')
+            const enc = new EncryptedAttachment(
+              new Uint8Array(rawData.data),
+              JSON.stringify(fileField),
+            )
+            fileData = Buffer.from(Attachment.decrypt(enc))
+          } catch {
+            // Fallback: manual AES-CTR decryption per Matrix spec
+            const { createDecipheriv } = await import('crypto')
+            const keyData = Buffer.from(fileField.key.k.replace(/-/g, '+').replace(/_/g, '/'), 'base64')
+            const iv = Buffer.from(fileField.iv, 'base64')
+            const decipher = createDecipheriv('aes-256-ctr', keyData, iv)
+            fileData = Buffer.concat([decipher.update(Buffer.from(rawData.data)), decipher.final()])
+          }
+        } else {
+          fileData = Buffer.from(rawData.data)
+        }
+
         const info = content.info as { mimetype?: string; size?: number } | undefined
         const fileName = (content.body as string) ?? 'file'
         const safeFileName = safeAttName(fileName)
         const ext = extname(safeFileName) || '.bin'
         const path = join(INBOX_DIR, `${Date.now()}-${event_id.replace(/[^a-zA-Z0-9]/g, '_')}${ext}`)
         mkdirSync(INBOX_DIR, { recursive: true })
-        writeFileSync(path, Buffer.from(data.data))
+        writeFileSync(path, fileData)
 
-        const kb = (data.data.byteLength / 1024).toFixed(0)
+        const kb = (fileData.length / 1024).toFixed(0)
         return {
           content: [{
             type: 'text',
