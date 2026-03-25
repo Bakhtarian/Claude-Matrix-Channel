@@ -16,8 +16,8 @@ import {
   UserId,
   VerificationMethod,
 } from '@matrix-org/matrix-sdk-crypto-wasm'
-
 import { MatrixClient } from 'matrix-bot-sdk'
+import { scheduleSave } from './crypto-persist.js'
 
 // ---------------------------------------------------------------------------
 // OlmMachine lifecycle
@@ -125,6 +125,7 @@ export async function processOutgoingRequests(client: MatrixClient): Promise<voi
       process.stderr.write(`matrix channel: crypto request (type=${req.type}) failed: ${err}\n`)
     }
   }
+  if (requests.length > 0) scheduleSave()
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +165,7 @@ export async function feedCryptoSync(raw: any): Promise<void> {
     unusedFallbacks,
     decryptionSettings,
   )
+  scheduleSave()
 
   // Check for verification requests in processed events
   for (const evt of processed) {
@@ -292,6 +294,7 @@ export async function encryptIfNeeded(
 
   // Encrypt the event
   const encryptedPayload = await m.encryptRoomEvent(new RoomId(roomId), eventType, JSON.stringify(content))
+  scheduleSave()
   return {
     eventType: 'm.room.encrypted',
     content: JSON.parse(encryptedPayload),

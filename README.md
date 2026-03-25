@@ -22,6 +22,8 @@ This MCP server connects a Matrix bot to your Claude Code session. When someone 
 
 E2EE is supported. The bot works in both encrypted and unencrypted rooms.
 
+The crypto store (identity keys, Olm sessions, megolm room keys) is **persisted to disk** and restored on startup, so the bot keeps the same device identity across restarts. Devices for users in the allowlist are **automatically locally trusted** on startup — no manual trust step is needed.
+
 By default, the bot encrypts for **all** devices in the room and accepts messages from unverified devices. To require device verification (stricter security), set `"requireVerifiedDevice": true` in `access.json`.
 
 **To verify the bot's device (optional, or required if `requireVerifiedDevice` is enabled):**

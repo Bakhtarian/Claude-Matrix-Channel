@@ -18,6 +18,7 @@ Matrix (Element) messaging channel for Claude Code, implemented as an MCP server
 | `lib.ts` | Pure/testable logic: `chunk`, `defaultAccess`, `pruneExpired`, `checkMention`, `evaluateGate` |
 | `lib.test.ts` | Unit tests (Bun test runner) |
 | `crypto.ts` | OlmMachine lifecycle, encrypt/decrypt, sync integration, `CryptoMatrixClient` |
+| `crypto-persist.ts` | Serialize/restore fake-indexeddb state to disk for crypto store persistence |
 | `.mcp.json` | MCP server config — runs `bun server.ts` |
 | `ACCESS.md` | Full access control schema and documentation |
 | `.claude-plugin/plugin.json` | Plugin manifest (name: `matrix`) |
@@ -33,6 +34,7 @@ All runtime state lives in `~/.claude/channels/matrix/` (override with `MATRIX_S
 - `.env` — `MATRIX_HOMESERVER_URL` and `MATRIX_ACCESS_TOKEN` (chmod 600)
 - `access.json` — access control policy (re-read on every inbound message)
 - `approved/` — pairing approval files (server polls every 5s)
+- `crypto-store.json` — serialized IndexedDB crypto state (identity keys, Olm sessions, room keys)
 - `bot-store/` — Matrix sync state
 - `inbox/` — downloaded attachments
 
@@ -69,7 +71,8 @@ All runtime state lives in `~/.claude/channels/matrix/` (override with `MATRIX_S
 - `decryptRoomEvent()` returns shield color: 0=Red/unverified, 1=Grey/partial, 2=None/verified
 - When `requireVerifiedDevice` is true, unverified devices get a one-time notice per room explaining how to verify. When false (default), messages from unverified devices are accepted.
 - Verification uses SAS (emoji comparison) via `/matrix:verify` skill
-- **Crypto store is in-memory** (`fake-indexeddb`): OlmMachine state is lost between restarts. One-time keys regenerate each run; `KeysUpload` handles "already exists" conflicts by retrying without OTKs.
+- **Crypto store persistence** (`crypto-persist.ts`): The IndexedDB store (backed by `fake-indexeddb` in-memory) is serialized to `~/.claude/channels/matrix/crypto-store.json` and restored on startup. This preserves identity keys, Olm sessions, and megolm room keys across restarts. Auto-save triggers after sync, outgoing requests, and encryption; a flush runs on shutdown.
+- **Auto-trust on startup**: All devices for users in `allowFrom` (global and per-room) are locally trusted during E2EE init, removing the need for manual trust after each restart.
 - **Device ID** is fetched from the homeserver's `/whoami` endpoint at startup (not generated locally)
 - **Wasm object ownership**: `@matrix-org/matrix-sdk-crypto-wasm` consumes `UserId` (and similar) objects when passed to OlmMachine methods. Never reuse a `UserId` instance across multiple calls — create fresh instances each time via a factory like `() => members.map(uid => new UserId(uid))`.
 

@@ -40,6 +40,7 @@ import {
   sendCryptoRequest,
   VerificationMethod,
 } from './crypto.js'
+import { enableAutoSave, flushSave, restoreCryptoStore, saveCryptoStore } from './crypto-persist.js'
 import { type Access, checkMention, chunk, defaultAccess, evaluateGate, type GateResult, pruneExpired } from './lib.js'
 
 const STATE_DIR = process.env.MATRIX_STATE_DIR ?? join(homedir(), '.claude', 'channels', 'matrix')
@@ -83,6 +84,13 @@ process.on('unhandledRejection', (err) => {
 process.on('uncaughtException', (err) => {
   process.stderr.write(`matrix channel: uncaught exception: ${err}\n`)
 })
+
+// Flush crypto store on shutdown
+for (const sig of ['SIGINT', 'SIGTERM', 'beforeExit'] as const) {
+  process.on(sig, () => {
+    flushSave().catch(() => {})
+  })
+}
 
 export type { Access, GateResult }
 
@@ -1215,10 +1223,49 @@ try {
     const deviceId = whoami.device_id
     if (!deviceId) throw new Error('Homeserver did not return a device_id — access token may not be device-bound')
 
+    // Restore persisted crypto store before initializing OlmMachine
+    const restored = await restoreCryptoStore(STATE_DIR)
+    if (restored) {
+      process.stderr.write('matrix channel: crypto store restored from disk\n')
+    }
+
     await initCrypto(botUserId, deviceId, 'claude-matrix-crypto')
-    // Upload device keys to the server so other clients can discover and trust this device
     await processOutgoingRequests(matrixClient)
     process.stderr.write(`matrix channel: device keys uploaded\n`)
+
+    // Enable periodic auto-save of crypto store
+    enableAutoSave(STATE_DIR)
+
+    // Auto-trust all devices for users in the allowlist
+    const access = loadAccess()
+    const usersToTrust = new Set(access.allowFrom)
+    for (const room of Object.values(access.rooms)) {
+      if (room.allowFrom) {
+        for (const u of room.allowFrom) usersToTrust.add(u)
+      }
+    }
+    if (usersToTrust.size > 0) {
+      const { UserId: WasmUserId, LocalTrust } = await import('@matrix-org/matrix-sdk-crypto-wasm')
+      const m = getOlmMachine()
+      for (const uid of usersToTrust) {
+        try {
+          await m.updateTrackedUsers([new WasmUserId(uid)])
+          await processOutgoingRequests(matrixClient)
+          const userDevices = await m.getUserDevices(new WasmUserId(uid))
+          for (const d of userDevices.devices()) {
+            if (!d.isLocallyTrusted()) {
+              await d.setLocalTrust(LocalTrust.Verified)
+            }
+          }
+        } catch (err) {
+          process.stderr.write(`matrix channel: auto-trust failed for ${uid}: ${err}\n`)
+        }
+      }
+      process.stderr.write(`matrix channel: auto-trusted devices for ${usersToTrust.size} user(s)\n`)
+    }
+
+    // Save after init + auto-trust so fresh state is persisted
+    await saveCryptoStore(STATE_DIR)
   } catch (err) {
     process.stderr.write(`matrix channel: E2EE init failed (encrypted rooms won't work): ${err}\n`)
   }
